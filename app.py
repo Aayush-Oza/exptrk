@@ -221,20 +221,59 @@ def create_app():
         if err:
             return err, code
 
-        txns = Transaction.query.filter_by(user_id=user_id).order_by(
-            Transaction.date.asc()
-        ).all()
+        user = User.query.get(user_id)
 
+        txns = Transaction.query.filter_by(
+            user_id=user_id
+        ).order_by(Transaction.date.asc()).all()
         pdf = FPDF()
         pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)
+
+    # =========================
+    # HEADER
+    # ========================
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, "LEDGER", ln=True, align="C")
+
+        pdf.ln(2)
+
+        pdf.set_font("Arial", size=10)
+        pdf.cell(0, 8, f"Account Name: {user.name}", ln=True)
+        pdf.cell(0, 8, f"Generated On: {datetime.now().strftime('%d-%m-%Y')}", ln=True)
+
+        pdf.ln(4)
+    # =========================
+    # TABLE HEADER
+    # ========================
+        pdf.set_font("Arial", "B", 10)
+
+        pdf.cell(25, 8, "Date", border=1)
+        pdf.cell(60, 8, "Particulars", border=1)
+        pdf.cell(15, 8, "L.F.", border=1)
+        pdf.cell(30, 8, "Debit", border=1, align="R")
+        pdf.cell(30, 8, "Credit", border=1, ln=True, align="R")
         pdf.set_font("Arial", size=10)
 
-        pdf.cell(0, 10, "Ledger Report", ln=True)
-
+    # =========================
+    # TABLE ROWS
+    # =========================
         for t in txns:
-            line = f"{t.date} | {t.type} | {t.category} | {t.mode} | {t.amount}"
-            pdf.cell(0, 8, line, ln=True)
+            particulars = t.category
+            if t.description:
+                particulars += f" ({t.description})"
 
+            debit = f"{t.amount:.2f}" if t.type == "debit" else ""
+            credit = f"{t.amount:.2f}" if t.type == "credit" else ""
+            pdf.cell(25, 8, t.date.strftime("%d-%m-%Y"), border=1)
+            pdf.cell(60, 8, particulars[:35], border=1)
+            pdf.cell(15, 8, "", border=1)  # L.F. empty
+            pdf.cell(30, 8, debit, border=1, align="R")
+            pdf.cell(30, 8, credit, border=1, ln=True, align="R")
+
+    # =========================
+    # SAVE + SEND
+    # ========================
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         pdf.output(tmp.name)
 
@@ -243,6 +282,7 @@ def create_app():
             as_attachment=True,
             download_name="ledger.pdf"
         )
+
 
     return app
 
