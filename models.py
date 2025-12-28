@@ -1,57 +1,39 @@
-import psycopg2
-from config import DATABASE_URL
+from datetime import datetime
+from extensions import db
 
-def get_connection():
-    if not DATABASE_URL:
-        raise Exception("DATABASE_URL not found. Check .env file.")
-    return psycopg2.connect(DATABASE_URL)
+class User(db.Model):
+    __tablename__ = "users"
 
-def create_tables():
-    conn = get_connection()
-    cur = conn.cursor()
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS transactions (
-        id SERIAL PRIMARY KEY,
-        user_id INT REFERENCES users(id) ON DELETE CASCADE,
-        amount NUMERIC(10,2) NOT NULL,
-        type VARCHAR(10) CHECK (type IN ('debit','credit')),
-        category TEXT NOT NULL,
-        mode VARCHAR(10) CHECK (mode IN ('cash','online')),
-        description TEXT,
-        date DATE DEFAULT CURRENT_DATE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
+class Transaction(db.Model):
+    __tablename__ = "transactions"
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS people_ledger (
-        id SERIAL PRIMARY KEY,
-        user_id INT REFERENCES users(id) ON DELETE CASCADE,
-        person_name TEXT NOT NULL,
-        amount NUMERIC(10,2) NOT NULL,
-        type VARCHAR(15) CHECK (type IN ('i_owe','owed_to_me')),
-        description TEXT,
-        date DATE DEFAULT CURRENT_DATE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    type = db.Column(db.String(10))
+    category = db.Column(db.String(100))
+    description = db.Column(db.String(255))
+    mode = db.Column(db.String(10))
+    description = db.Column(db.Text)
+    date = db.Column(db.Date)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    conn.commit()
-    cur.close()
-    conn.close()
 
-    print("✅ Tables created successfully")
+class PeopleLedger(db.Model):
+    __tablename__ = "people_ledger"
 
-if __name__ == "__main__":
-    create_tables()
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    person_name = db.Column(db.String(100))
+    amount = db.Column(db.Numeric(10, 2))
+    type = db.Column(db.String(20))
+    description = db.Column(db.Text)
+    date = db.Column(db.Date)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
