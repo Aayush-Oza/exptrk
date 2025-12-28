@@ -1,16 +1,16 @@
 from flask import (
-    Flask, Response, request, jsonify,
-    session, render_template, redirect
+    Flask, request, jsonify, session, send_file
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_cors import CORS
+from datetime import datetime
+from fpdf import FPDF
+import tempfile
+import os
+
 from config import Config
 from extensions import db, migrate
 from models import User, Transaction
-from fpdf import FPDF
-from datetime import datetime
-from flask import send_file
-from flask_cors import CORS   # ✅ ADD
-import tempfile
 
 
 def create_app():
@@ -18,60 +18,42 @@ def create_app():
     app.config.from_object(Config)
 
     # =====================================================
-    # 🔥 SESSION + COOKIE CONFIG (REQUIRED FOR GITHUB PAGES)
+    # SESSION / COOKIE (GITHUB PAGES COMPATIBLE)
     # =====================================================
     app.config.update(
-        SESSION_COOKIE_SAMESITE="None",   # REQUIRED for cross-site
-        SESSION_COOKIE_SECURE=True        # REQUIRED for HTTPS
+        SESSION_COOKIE_SAMESITE="None",
+        SESSION_COOKIE_SECURE=True
     )
 
     # =====================================================
-    # 🔥 CORS CONFIG (DO NOT USE *)
+    # CORS
     # =====================================================
     CORS(
         app,
         supports_credentials=True,
-        origins=[
-            "https://aayush-oza.github.io"  # 👈 YOUR FRONTEND
-        ]
+        origins=["https://aayush-oza.github.io"]
     )
 
     db.init_app(app)
     migrate.init_app(app, db)
 
     # =====================================================
-    # PAGE ROUTES
+    # HELPERS
     # =====================================================
-
-    @app.route("/")
-    def login_page():
-        return render_template("login.html")
-
-    @app.route("/register")
-    def register_page():
-        return render_template("register.html")
-
-    @app.route("/dashboard")
-    def dashboard():
-        if not session.get("user_id"):
-            return redirect("/")
-        return render_template("dashboard.html")
-
-    @app.route("/transactions")
-    def transactions_page():
-        if not session.get("user_id"):
-            return redirect("/")
-        return render_template("transactions.html")
+    def require_login():
+        uid = session.get("user_id")
+        if not uid:
+            return None, jsonify({"error": "Unauthorized"}), 401
+        return uid, None, None
 
     # =====================================================
-    # AUTH APIs
+    # AUTH
     # =====================================================
-
     @app.route("/api/register", methods=["POST"])
-    def api_register():
+    def register():
         data = request.get_json()
-        if not data or not all(k in data for k in ("name", "email", "password")):
-            return jsonify({"success": False, "error": "Invalid data"}), 400
+        if not data:
+            return jsonify({"error": "Invalid data"}), 400
 
         try:
             user = User(
@@ -84,39 +66,33 @@ def create_app():
             return jsonify({"success": True})
         except Exception:
             db.session.rollback()
-            return jsonify({"success": False, "error": "Email exists"}), 400
+            return jsonify({"error": "Email already exists"}), 400
 
     @app.route("/api/login", methods=["POST"])
-    def api_login():
+    def login():
         data = request.get_json()
         user = User.query.filter_by(email=data.get("email")).first()
 
         if user and check_password_hash(user.password, data.get("password")):
             session["user_id"] = user.id
-            session.modified = True  # 🔥 ENSURE COOKIE IS SENT
+            session.modified = True
             return jsonify({"success": True})
 
-        return jsonify({"success": False}), 401
-
-    @app.route("/logout")
-    def logout():
-        session.clear()
-        return redirect("/")
+        return jsonify({"error": "Invalid credentials"}), 401
 
     # =====================================================
-    # TRANSACTION APIs
+    # TRANSACTIONS
     # =====================================================
-
     @app.route("/api/add-transaction", methods=["POST"])
     def add_transaction():
-        user_id = session.get("user_id")
-        if not user_id:
-            return jsonify({"success": False, "error": "Unauthorized"}), 401
+        user_id, err, code = require_login()
+        if err:
+            return err, code
 
         data = request.get_json()
         required = ("amount", "type", "category", "mode", "date")
-        if not data or not all(k in data and data[k] for k in required):
-            return jsonify({"success": False, "error": "Missing fields"}), 400
+        if not all(data.get(k) for k in required):
+            return jsonify({"error": "Missing fields"}), 400
 
         try:
             txn = Transaction(
@@ -131,21 +107,19 @@ def create_app():
             db.session.add(txn)
             db.session.commit()
             return jsonify({"success": True})
-
         except Exception as e:
             db.session.rollback()
-            print("ADD TXN ERROR:", e)
-            return jsonify({"success": False, "error": str(e)}), 500
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/api/transactions")
-    def get_transactions():
+    def transactions():
         user_id = session.get("user_id")
         if not user_id:
             return jsonify([])
 
-        txns = Transaction.query.filter_by(
-            user_id=user_id
-        ).order_by(Transaction.date.desc()).all()
+        txns = Transaction.query.filter_by(user_id=user_id).order_by(
+            Transaction.date.desc()
+        ).all()
 
         return jsonify([
             {
@@ -159,32 +133,18 @@ def create_app():
             } for t in txns
         ])
 
-    @app.route("/api/delete-transaction/<int:id>", methods=["DELETE"])
-    def delete_transaction(id):
-        user_id = session.get("user_id")
-        if not user_id:
-            return jsonify({"error": "Unauthorized"}), 401
-
-        txn = Transaction.query.filter_by(
-            id=id, user_id=user_id
-        ).first_or_404()
-
-        db.session.delete(txn)
-        db.session.commit()
-        return jsonify({"success": True})
-
-    @app.route("/api/edit-transaction/<int:id>", methods=["PUT"])
-    def edit_transaction(id):
-        user_id = session.get("user_id")
-        if not user_id:
-            return jsonify({"error": "Unauthorized"}), 401
+    @app.route("/api/edit-transaction/<int:txn_id>", methods=["PUT"])
+    def edit_transaction(txn_id):
+        user_id, err, code = require_login()
+        if err:
+            return err, code
 
         data = request.get_json()
         txn = Transaction.query.filter_by(
-            id=id, user_id=user_id
+            id=txn_id, user_id=user_id
         ).first_or_404()
 
-        txn.amount = data["amount"]
+        txn.amount = float(data["amount"])
         txn.type = data["type"]
         txn.category = data["category"]
         txn.description = data.get("description")
@@ -194,10 +154,95 @@ def create_app():
         db.session.commit()
         return jsonify({"success": True})
 
+    @app.route("/api/delete-transaction/<int:txn_id>", methods=["DELETE"])
+    def delete_transaction(txn_id):
+        user_id, err, code = require_login()
+        if err:
+            return err, code
+
+        txn = Transaction.query.filter_by(
+            id=txn_id, user_id=user_id
+        ).first_or_404()
+
+        db.session.delete(txn)
+        db.session.commit()
+        return jsonify({"success": True})
+
     # =====================================================
-    # LEDGER + ANALYTICS (UNCHANGED)
+    # LEDGER (BALANCE)
     # =====================================================
-    # (your existing code continues exactly as-is)
+    @app.route("/api/ledger")
+    def ledger():
+        user_id, err, code = require_login()
+        if err:
+            return err, code
+
+        txns = Transaction.query.filter_by(user_id=user_id).all()
+        balance = 0
+
+        for t in txns:
+            balance += t.amount if t.type == "credit" else -t.amount
+
+        return jsonify({"balance": round(balance, 2)})
+
+    # =====================================================
+    # ANALYTICS
+    # =====================================================
+    @app.route("/api/analytics")
+    def analytics():
+        user_id, err, code = require_login()
+        if err:
+            return err, code
+
+        txns = Transaction.query.filter_by(user_id=user_id).all()
+
+        modes = {}
+        types = {}
+        categories = {}
+
+        for t in txns:
+            modes[t.mode] = modes.get(t.mode, 0) + t.amount
+            types[t.type] = types.get(t.type, 0) + t.amount
+            if t.type == "debit":
+                categories[t.category] = categories.get(t.category, 0) + t.amount
+
+        return jsonify({
+            "modes": modes,
+            "types": types,
+            "categories": categories
+        })
+
+    # =====================================================
+    # DOWNLOAD LEDGER (PDF)
+    # =====================================================
+    @app.route("/api/download-ledger")
+    def download_ledger():
+        user_id, err, code = require_login()
+        if err:
+            return err, code
+
+        txns = Transaction.query.filter_by(user_id=user_id).order_by(
+            Transaction.date.asc()
+        ).all()
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=10)
+
+        pdf.cell(0, 10, "Ledger Report", ln=True)
+
+        for t in txns:
+            line = f"{t.date} | {t.type} | {t.category} | {t.mode} | {t.amount}"
+            pdf.cell(0, 8, line, ln=True)
+
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        pdf.output(tmp.name)
+
+        return send_file(
+            tmp.name,
+            as_attachment=True,
+            download_name="ledger.pdf"
+        )
 
     return app
 
