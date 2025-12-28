@@ -3,5 +3,6 @@ Flask-SQLAlchemy
 Flask-Migrate
 Flask-Cors
 psycopg2-binary
+fpdf
 gunicorn
 python-dotenv
