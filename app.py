@@ -283,6 +283,9 @@ def create_app():
             download_name="ledger.pdf"
         )
 
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "ok"}), 200
 
     return app
 
