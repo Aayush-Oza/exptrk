@@ -1,14 +1,14 @@
+import os
 from flask import Flask, request, jsonify, send_file
-from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token,
     jwt_required, get_jwt_identity
 )
+from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 from fpdf import FPDF
 import tempfile
-import os
 
 from extensions import db, migrate
 from models import User, Transaction
@@ -18,17 +18,25 @@ def create_app():
     app = Flask(__name__)
 
     # =====================================================
-    # 🔥 FORCE CONFIG (NO Config CLASS, NO MAGIC)
+    # 🔥 SINGLE SOURCE OF TRUTH (NO Config CLASS)
     # =====================================================
-    app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY")
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
-    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    JWT_SECRET = os.environ.get("JWT_SECRET_KEY")
+    DB_URL = os.environ.get("DATABASE_URL")
 
-    if not app.config["JWT_SECRET_KEY"]:
+    if not JWT_SECRET:
         raise RuntimeError("JWT_SECRET_KEY is NOT set")
-
-    if not app.config["SQLALCHEMY_DATABASE_URI"]:
+    if not DB_URL:
         raise RuntimeError("DATABASE_URL is NOT set")
+
+    app.config.update(
+        JWT_SECRET_KEY=JWT_SECRET,
+        SQLALCHEMY_DATABASE_URI=DB_URL,
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        JWT_TOKEN_LOCATION=["headers"],
+        JWT_HEADER_NAME="Authorization",
+        JWT_HEADER_TYPE="Bearer",
+        JWT_ACCESS_TOKEN_EXPIRES=False,
+    )
 
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True
@@ -62,7 +70,7 @@ def create_app():
     )
 
     # =====================================================
-    # DB
+    # DATABASE
     # =====================================================
     db.init_app(app)
     migrate.init_app(app, db)
