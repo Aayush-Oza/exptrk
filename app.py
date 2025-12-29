@@ -20,25 +20,27 @@ def create_app():
     app.config.from_object(Config)
 
     # =====================================================
-    # DATABASE SAFETY (FIX RANDOM SSL DROPS)
+    # DATABASE SAFETY
     # =====================================================
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True
     }
 
     # =====================================================
-    # JWT CONFIG (DO NOT CHANGE CASUALLY)
+    # JWT CONFIG (CRITICAL — FIXES 401 ISSUE)
     # =====================================================
     app.config["JWT_SECRET_KEY"] = os.environ.get(
         "JWT_SECRET_KEY", "dev-secret-change-me"
     )
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
+    app.config["JWT_HEADER_NAME"] = "Authorization"
+    app.config["JWT_HEADER_TYPE"] = "Bearer"
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
 
     jwt = JWTManager(app)
 
     # =====================================================
-    # JWT ERROR HANDLERS (FIX 422 HELL)
+    # JWT ERROR HANDLERS (NO MORE 422)
     # =====================================================
     @jwt.unauthorized_loader
     def missing_token(reason):
@@ -53,11 +55,12 @@ def create_app():
         return jsonify(error="Token expired"), 401
 
     # =====================================================
-    # CORS (THIS WAS THE BIG ONE)
+    # CORS (CORRECT FOR JWT HEADERS)
     # =====================================================
     CORS(
         app,
         origins=["https://aayush-oza.github.io"],
+        supports_credentials=False,
         allow_headers=["Content-Type", "Authorization"],
         expose_headers=["Authorization"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
@@ -139,7 +142,6 @@ def create_app():
     @jwt_required()
     def transactions():
         user_id = get_jwt_identity()
-
         txns = Transaction.query.filter_by(user_id=user_id).order_by(
             Transaction.date.desc()
         ).all()
@@ -198,9 +200,9 @@ def create_app():
         user_id = get_jwt_identity()
         txns = Transaction.query.filter_by(user_id=user_id).all()
 
-        balance = 0
-        for t in txns:
-            balance += t.amount if t.type == "credit" else -t.amount
+        balance = sum(
+            t.amount if t.type == "credit" else -t.amount for t in txns
+        )
 
         return jsonify({"balance": round(balance, 2)})
 
@@ -228,7 +230,7 @@ def create_app():
         })
 
     # =====================================================
-    # DOWNLOAD LEDGER (PDF)
+    # DOWNLOAD LEDGER
     # =====================================================
     @app.route("/api/download-ledger")
     @jwt_required()
@@ -247,30 +249,26 @@ def create_app():
         pdf.set_font("Helvetica", "B", 14)
         pdf.cell(0, 10, "LEDGER", ln=True, align="C")
 
-        pdf.ln(2)
         pdf.set_font("Helvetica", size=10)
         pdf.cell(0, 8, f"Account Name: {user.name}", ln=True)
         pdf.cell(0, 8, f"Generated On: {datetime.now().strftime('%d-%m-%Y')}", ln=True)
-        pdf.ln(4)
 
+        pdf.ln(4)
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(25, 8, "Date", border=1)
-        pdf.cell(60, 8, "Particulars", border=1)
-        pdf.cell(15, 8, "L.F.", border=1)
-        pdf.cell(30, 8, "Debit", border=1, align="R")
-        pdf.cell(30, 8, "Credit", border=1, ln=True, align="R")
+        pdf.cell(25, 8, "Date", 1)
+        pdf.cell(60, 8, "Particulars", 1)
+        pdf.cell(15, 8, "L.F.", 1)
+        pdf.cell(30, 8, "Debit", 1, align="R")
+        pdf.cell(30, 8, "Credit", 1, ln=True, align="R")
 
         pdf.set_font("Helvetica", size=10)
         for t in txns:
             particulars = t.category + (f" ({t.description})" if t.description else "")
-            debit = f"{t.amount:.2f}" if t.type == "debit" else ""
-            credit = f"{t.amount:.2f}" if t.type == "credit" else ""
-
-            pdf.cell(25, 8, t.date.strftime("%d-%m-%Y"), border=1)
-            pdf.cell(60, 8, particulars[:35], border=1)
-            pdf.cell(15, 8, "", border=1)
-            pdf.cell(30, 8, debit, border=1, align="R")
-            pdf.cell(30, 8, credit, border=1, ln=True, align="R")
+            pdf.cell(25, 8, t.date.strftime("%d-%m-%Y"), 1)
+            pdf.cell(60, 8, particulars[:35], 1)
+            pdf.cell(15, 8, "", 1)
+            pdf.cell(30, 8, f"{t.amount:.2f}" if t.type == "debit" else "", 1, align="R")
+            pdf.cell(30, 8, f"{t.amount:.2f}" if t.type == "credit" else "", 1, ln=True, align="R")
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         pdf.output(tmp.name)
