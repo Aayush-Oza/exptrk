@@ -6,3 +6,4 @@ psycopg2-binary
 fpdf
 gunicorn
 python-dotenv
+flask-jwt-extended
