@@ -8,6 +8,7 @@ from flask_jwt_extended import (
 from datetime import datetime
 from fpdf import FPDF
 import tempfile
+import os
 
 from config import Config
 from extensions import db, migrate
@@ -19,20 +20,47 @@ def create_app():
     app.config.from_object(Config)
 
     # =====================================================
-    # JWT CONFIG
+    # DATABASE SAFETY (FIX RANDOM SSL DROPS)
     # =====================================================
-    app.config["JWT_SECRET_KEY"] = "change-this-secret"
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_pre_ping": True
+    }
+
+    # =====================================================
+    # JWT CONFIG (DO NOT CHANGE CASUALLY)
+    # =====================================================
+    app.config["JWT_SECRET_KEY"] = os.environ.get(
+        "JWT_SECRET_KEY", "dev-secret-change-me"
+    )
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
 
     jwt = JWTManager(app)
 
     # =====================================================
-    # CORS (NO CREDENTIALS NEEDED ANYMORE)
+    # JWT ERROR HANDLERS (FIX 422 HELL)
+    # =====================================================
+    @jwt.unauthorized_loader
+    def missing_token(reason):
+        return jsonify(error="Missing token", detail=reason), 401
+
+    @jwt.invalid_token_loader
+    def invalid_token(reason):
+        return jsonify(error="Invalid token", detail=reason), 401
+
+    @jwt.expired_token_loader
+    def expired_token(jwt_header, jwt_payload):
+        return jsonify(error="Token expired"), 401
+
+    # =====================================================
+    # CORS (THIS WAS THE BIG ONE)
     # =====================================================
     CORS(
         app,
-        origins=["https://aayush-oza.github.io"]
+        origins=["https://aayush-oza.github.io"],
+        allow_headers=["Content-Type", "Authorization"],
+        expose_headers=["Authorization"],
+        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
 
     db.init_app(app)
