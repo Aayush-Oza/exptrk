@@ -1,9 +1,6 @@
 import os
 
 class Config:
-    # Required
-    JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]
-    SQLALCHEMY_DATABASE_URI = os.environ["DATABASE_URL"]
-
-    # Optional / safe defaults
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
