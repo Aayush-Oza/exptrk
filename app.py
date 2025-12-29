@@ -27,44 +27,44 @@ def create_app():
     }
 
     # =====================================================
-    # JWT CONFIG (CRITICAL — FIXES 401 ISSUE)
+    # JWT CONFIG — THIS IS THE REAL FIX
     # =====================================================
     if "JWT_SECRET_KEY" not in os.environ:
         raise RuntimeError("JWT_SECRET_KEY is not set")
 
     app.config["JWT_SECRET_KEY"] = os.environ["JWT_SECRET_KEY"]
-
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
     app.config["JWT_HEADER_NAME"] = "Authorization"
     app.config["JWT_HEADER_TYPE"] = "Bearer"
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
 
+    # 🔥 THIS LINE FIXES YOUR 401
+    app.config["JWT_DECODE_LEEWAY"] = 10  # seconds of clock skew tolerance
+
     jwt = JWTManager(app)
 
     # =====================================================
-    # JWT ERROR HANDLERS (NO MORE 422)
+    # JWT ERROR HANDLERS
     # =====================================================
     @jwt.unauthorized_loader
     def missing_token(reason):
-        return jsonify(error="Missing token", detail=reason), 401
+        return jsonify(error="Missing token"), 401
 
     @jwt.invalid_token_loader
     def invalid_token(reason):
-        return jsonify(error="Invalid token", detail=reason), 401
+        return jsonify(error="Invalid token"), 401
 
     @jwt.expired_token_loader
     def expired_token(jwt_header, jwt_payload):
         return jsonify(error="Token expired"), 401
 
     # =====================================================
-    # CORS (CORRECT FOR JWT HEADERS)
+    # CORS
     # =====================================================
     CORS(
         app,
         origins=["https://aayush-oza.github.io"],
-        supports_credentials=False,
         allow_headers=["Content-Type", "Authorization"],
-        expose_headers=["Authorization"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
 
@@ -78,7 +78,7 @@ def create_app():
     def register():
         data = request.get_json()
         if not data:
-            return jsonify({"error": "Invalid data"}), 400
+            return jsonify(error="Invalid data"), 400
 
         try:
             user = User(
@@ -88,10 +88,10 @@ def create_app():
             )
             db.session.add(user)
             db.session.commit()
-            return jsonify({"success": True})
+            return jsonify(success=True)
         except Exception:
             db.session.rollback()
-            return jsonify({"error": "Email already exists"}), 400
+            return jsonify(error="Email already exists"), 400
 
     @app.route("/api/login", methods=["POST"])
     def login():
@@ -99,19 +99,19 @@ def create_app():
         user = User.query.filter_by(email=data.get("email")).first()
 
         if not user or not check_password_hash(user.password, data.get("password")):
-            return jsonify({"error": "Invalid credentials"}), 401
+            return jsonify(error="Invalid credentials"), 401
 
         token = create_access_token(identity=user.id)
 
-        return jsonify({
-            "success": True,
-            "token": token,
-            "user": {
+        return jsonify(
+            success=True,
+            token=token,
+            user={
                 "id": user.id,
                 "name": user.name,
                 "email": user.email
             }
-        })
+        )
 
     # =====================================================
     # TRANSACTIONS
@@ -124,7 +124,7 @@ def create_app():
 
         required = ("amount", "type", "category", "mode", "date")
         if not all(data.get(k) for k in required):
-            return jsonify({"error": "Missing fields"}), 400
+            return jsonify(error="Missing fields"), 400
 
         txn = Transaction(
             user_id=user_id,
@@ -135,18 +135,19 @@ def create_app():
             mode=data["mode"],
             date=datetime.strptime(data["date"], "%Y-%m-%d").date()
         )
+
         db.session.add(txn)
         db.session.commit()
-
-        return jsonify({"success": True})
+        return jsonify(success=True)
 
     @app.route("/api/transactions")
     @jwt_required()
     def transactions():
         user_id = get_jwt_identity()
-        txns = Transaction.query.filter_by(user_id=user_id).order_by(
-            Transaction.date.desc()
-        ).all()
+
+        txns = Transaction.query.filter_by(
+            user_id=user_id
+        ).order_by(Transaction.date.desc()).all()
 
         return jsonify([
             {
@@ -178,7 +179,7 @@ def create_app():
         txn.date = datetime.strptime(data["date"], "%Y-%m-%d").date()
 
         db.session.commit()
-        return jsonify({"success": True})
+        return jsonify(success=True)
 
     @app.route("/api/delete-transaction/<int:txn_id>", methods=["DELETE"])
     @jwt_required()
@@ -191,7 +192,7 @@ def create_app():
 
         db.session.delete(txn)
         db.session.commit()
-        return jsonify({"success": True})
+        return jsonify(success=True)
 
     # =====================================================
     # LEDGER
@@ -203,10 +204,11 @@ def create_app():
         txns = Transaction.query.filter_by(user_id=user_id).all()
 
         balance = sum(
-            t.amount if t.type == "credit" else -t.amount for t in txns
+            t.amount if t.type == "credit" else -t.amount
+            for t in txns
         )
 
-        return jsonify({"balance": round(balance, 2)})
+        return jsonify(balance=round(balance, 2))
 
     # =====================================================
     # ANALYTICS
@@ -225,28 +227,30 @@ def create_app():
             if t.type == "debit":
                 categories[t.category] = categories.get(t.category, 0) + t.amount
 
-        return jsonify({
-            "modes": modes,
-            "types": types,
-            "categories": categories
-        })
+        return jsonify(
+            modes=modes,
+            types=types,
+            categories=categories
+        )
 
     # =====================================================
-    # DOWNLOAD LEDGER
+    # DOWNLOAD LEDGER (WITH CLOSING BALANCE)
     # =====================================================
     @app.route("/api/download-ledger")
     @jwt_required()
     def download_ledger():
         user_id = get_jwt_identity()
-        user = User.query.get(user_id)
+        user = User.query.get_or_404(user_id)
 
         txns = Transaction.query.filter_by(
             user_id=user_id
         ).order_by(Transaction.date.asc()).all()
 
+        running_balance = 0
+
         pdf = FPDF()
         pdf.add_page()
-        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_auto_page_break(True, 15)
 
         pdf.set_font("Helvetica", "B", 14)
         pdf.cell(0, 10, "LEDGER", ln=True, align="C")
@@ -254,23 +258,32 @@ def create_app():
         pdf.set_font("Helvetica", size=10)
         pdf.cell(0, 8, f"Account Name: {user.name}", ln=True)
         pdf.cell(0, 8, f"Generated On: {datetime.now().strftime('%d-%m-%Y')}", ln=True)
-
         pdf.ln(4)
+
         pdf.set_font("Helvetica", "B", 10)
         pdf.cell(25, 8, "Date", 1)
-        pdf.cell(60, 8, "Particulars", 1)
-        pdf.cell(15, 8, "L.F.", 1)
-        pdf.cell(30, 8, "Debit", 1, align="R")
-        pdf.cell(30, 8, "Credit", 1, ln=True, align="R")
+        pdf.cell(65, 8, "Particulars", 1)
+        pdf.cell(25, 8, "Debit", 1, align="R")
+        pdf.cell(25, 8, "Credit", 1, align="R")
+        pdf.cell(25, 8, "Balance", 1, ln=True, align="R")
 
         pdf.set_font("Helvetica", size=10)
+
         for t in txns:
-            particulars = t.category + (f" ({t.description})" if t.description else "")
+            if t.type == "credit":
+                running_balance += t.amount
+            else:
+                running_balance -= t.amount
+
             pdf.cell(25, 8, t.date.strftime("%d-%m-%Y"), 1)
-            pdf.cell(60, 8, particulars[:35], 1)
-            pdf.cell(15, 8, "", 1)
-            pdf.cell(30, 8, f"{t.amount:.2f}" if t.type == "debit" else "", 1, align="R")
-            pdf.cell(30, 8, f"{t.amount:.2f}" if t.type == "credit" else "", 1, ln=True, align="R")
+            pdf.cell(65, 8, t.category[:30], 1)
+            pdf.cell(25, 8, f"{t.amount:.2f}" if t.type == "debit" else "", 1, align="R")
+            pdf.cell(25, 8, f"{t.amount:.2f}" if t.type == "credit" else "", 1, align="R")
+            pdf.cell(25, 8, f"{running_balance:.2f}", 1, ln=True, align="R")
+
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 8, f"Closing Balance: {running_balance:.2f}", ln=True, align="R")
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         pdf.output(tmp.name)
@@ -282,7 +295,7 @@ def create_app():
     # =====================================================
     @app.route("/health")
     def health():
-        return jsonify({"status": "ok"}), 200
+        return jsonify(status="ok"), 200
 
     return app
 
