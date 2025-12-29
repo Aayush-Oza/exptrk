@@ -29,9 +29,11 @@ def create_app():
     # =====================================================
     # JWT CONFIG (CRITICAL — FIXES 401 ISSUE)
     # =====================================================
-    app.config["JWT_SECRET_KEY"] = os.environ.get(
-        "JWT_SECRET_KEY", "dev-secret-change-me"
-    )
+    if "JWT_SECRET_KEY" not in os.environ:
+        raise RuntimeError("JWT_SECRET_KEY is not set")
+
+    app.config["JWT_SECRET_KEY"] = os.environ["JWT_SECRET_KEY"]
+
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
     app.config["JWT_HEADER_NAME"] = "Authorization"
     app.config["JWT_HEADER_TYPE"] = "Bearer"
