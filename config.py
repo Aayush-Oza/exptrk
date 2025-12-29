@@ -1,11 +1,9 @@
 import os
 
 class Config:
-    # Flask session / CSRF (not used by JWT, but fine to keep)
-    SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "unused-flask-secret")
+    # Required
+    JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]
+    SQLALCHEMY_DATABASE_URI = os.environ["DATABASE_URL"]
 
-    # JWT — THIS IS THE ONLY KEY JWT WILL USE
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-
-    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
+    # Optional / safe defaults
     SQLALCHEMY_TRACK_MODIFICATIONS = False

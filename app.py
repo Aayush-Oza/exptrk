@@ -10,31 +10,35 @@ from fpdf import FPDF
 import tempfile
 import os
 
-from config import Config
 from extensions import db, migrate
 from models import User, Transaction
 
 
 def create_app():
     app = Flask(__name__)
-    app.config.from_object(Config)
 
     # =====================================================
-    # DATABASE SAFETY
+    # 🔥 FORCE CONFIG (NO Config CLASS, NO MAGIC)
     # =====================================================
+    app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY")
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    if not app.config["JWT_SECRET_KEY"]:
+        raise RuntimeError("JWT_SECRET_KEY is NOT set")
+
+    if not app.config["SQLALCHEMY_DATABASE_URI"]:
+        raise RuntimeError("DATABASE_URL is NOT set")
+
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True
     }
 
     # =====================================================
-    # JWT CONFIG — THIS IS THE REAL FIX
+    # JWT
     # =====================================================
-
     jwt = JWTManager(app)
 
-    # =====================================================
-    # JWT ERROR HANDLERS
-    # =====================================================
     @jwt.unauthorized_loader
     def missing_token(reason):
         return jsonify(error="Missing token"), 401
@@ -57,6 +61,9 @@ def create_app():
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
 
+    # =====================================================
+    # DB
+    # =====================================================
     db.init_app(app)
     migrate.init_app(app, db)
 
@@ -133,10 +140,7 @@ def create_app():
     @jwt_required()
     def transactions():
         user_id = get_jwt_identity()
-
-        txns = Transaction.query.filter_by(
-            user_id=user_id
-        ).order_by(Transaction.date.desc()).all()
+        txns = Transaction.query.filter_by(user_id=user_id).order_by(Transaction.date.desc()).all()
 
         return jsonify([
             {
@@ -150,34 +154,11 @@ def create_app():
             } for t in txns
         ])
 
-    @app.route("/api/edit-transaction/<int:txn_id>", methods=["PUT"])
-    @jwt_required()
-    def edit_transaction(txn_id):
-        user_id = get_jwt_identity()
-        data = request.get_json()
-
-        txn = Transaction.query.filter_by(
-            id=txn_id, user_id=user_id
-        ).first_or_404()
-
-        txn.amount = float(data["amount"])
-        txn.type = data["type"]
-        txn.category = data["category"]
-        txn.description = data.get("description")
-        txn.mode = data["mode"]
-        txn.date = datetime.strptime(data["date"], "%Y-%m-%d").date()
-
-        db.session.commit()
-        return jsonify(success=True)
-
     @app.route("/api/delete-transaction/<int:txn_id>", methods=["DELETE"])
     @jwt_required()
     def delete_transaction(txn_id):
         user_id = get_jwt_identity()
-
-        txn = Transaction.query.filter_by(
-            id=txn_id, user_id=user_id
-        ).first_or_404()
+        txn = Transaction.query.filter_by(id=txn_id, user_id=user_id).first_or_404()
 
         db.session.delete(txn)
         db.session.commit()
@@ -216,63 +197,28 @@ def create_app():
             if t.type == "debit":
                 categories[t.category] = categories.get(t.category, 0) + t.amount
 
-        return jsonify(
-            modes=modes,
-            types=types,
-            categories=categories
-        )
+        return jsonify(modes=modes, types=types, categories=categories)
 
     # =====================================================
-    # DOWNLOAD LEDGER (WITH CLOSING BALANCE)
+    # DOWNLOAD LEDGER
     # =====================================================
     @app.route("/api/download-ledger")
     @jwt_required()
     def download_ledger():
         user_id = get_jwt_identity()
         user = User.query.get_or_404(user_id)
-
-        txns = Transaction.query.filter_by(
-            user_id=user_id
-        ).order_by(Transaction.date.asc()).all()
+        txns = Transaction.query.filter_by(user_id=user_id).order_by(Transaction.date.asc()).all()
 
         running_balance = 0
-
         pdf = FPDF()
         pdf.add_page()
-        pdf.set_auto_page_break(True, 15)
-
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 10, "LEDGER", ln=True, align="C")
-
         pdf.set_font("Helvetica", size=10)
-        pdf.cell(0, 8, f"Account Name: {user.name}", ln=True)
-        pdf.cell(0, 8, f"Generated On: {datetime.now().strftime('%d-%m-%Y')}", ln=True)
-        pdf.ln(4)
 
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(25, 8, "Date", 1)
-        pdf.cell(65, 8, "Particulars", 1)
-        pdf.cell(25, 8, "Debit", 1, align="R")
-        pdf.cell(25, 8, "Credit", 1, align="R")
-        pdf.cell(25, 8, "Balance", 1, ln=True, align="R")
-
-        pdf.set_font("Helvetica", size=10)
+        pdf.cell(0, 10, f"Ledger - {user.name}", ln=True)
 
         for t in txns:
-            if t.type == "credit":
-                running_balance += t.amount
-            else:
-                running_balance -= t.amount
-
-            pdf.cell(25, 8, t.date.strftime("%d-%m-%Y"), 1)
-            pdf.cell(65, 8, t.category[:30], 1)
-            pdf.cell(25, 8, f"{t.amount:.2f}" if t.type == "debit" else "", 1, align="R")
-            pdf.cell(25, 8, f"{t.amount:.2f}" if t.type == "credit" else "", 1, align="R")
-            pdf.cell(25, 8, f"{running_balance:.2f}", 1, ln=True, align="R")
-
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 8, f"Closing Balance: {running_balance:.2f}", ln=True, align="R")
+            running_balance += t.amount if t.type == "credit" else -t.amount
+            pdf.cell(0, 8, f"{t.date} | {t.category} | {running_balance:.2f}", ln=True)
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         pdf.output(tmp.name)
@@ -284,7 +230,7 @@ def create_app():
     # =====================================================
     @app.route("/health")
     def health():
-        return jsonify(status="ok"), 200
+        return jsonify(status="ok")
 
     return app
 
