@@ -29,17 +29,6 @@ def create_app():
     # =====================================================
     # JWT CONFIG — THIS IS THE REAL FIX
     # =====================================================
-    if "JWT_SECRET_KEY" not in os.environ:
-        raise RuntimeError("JWT_SECRET_KEY is not set")
-
-    app.config["JWT_SECRET_KEY"] = os.environ["JWT_SECRET_KEY"]
-    app.config["JWT_TOKEN_LOCATION"] = ["headers"]
-    app.config["JWT_HEADER_NAME"] = "Authorization"
-    app.config["JWT_HEADER_TYPE"] = "Bearer"
-    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
-
-    # 🔥 THIS LINE FIXES YOUR 401
-    app.config["JWT_DECODE_LEEWAY"] = 10  # seconds of clock skew tolerance
 
     jwt = JWTManager(app)
 

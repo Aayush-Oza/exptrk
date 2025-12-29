@@ -1,7 +1,4 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 class Config:
     # Flask session / CSRF (not used by JWT, but fine to keep)
