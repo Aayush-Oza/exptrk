@@ -162,6 +162,25 @@ def create_app():
             } for t in txns
         ])
 
+    @app.route("/api/edit-transaction/<int:txn_id>", methods=["PUT"])
+    @jwt_required()
+    def edit_transaction(txn_id):
+        user_id = get_jwt_identity()
+        txn = Transaction.query.filter_by(
+            id=txn_id,
+            user_id=user_id
+        ).first_or_404()
+
+        data = request.get_json()
+        txn.amount = float(data["amount"])
+        txn.type = data["type"]
+        txn.category = data["category"]
+        txn.description = data.get("description")
+        txn.mode = data["mode"]
+        txn.date = datetime.strptime(data["date"], "%Y-%m-%d").date()
+        db.session.commit()
+        return jsonify(success=True)
+
     @app.route("/api/delete-transaction/<int:txn_id>", methods=["DELETE"])
     @jwt_required()
     def delete_transaction(txn_id):
