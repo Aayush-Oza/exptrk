@@ -1,14 +1,17 @@
 import os
+from datetime import datetime, timedelta
+import tempfile
+
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_jwt_extended import (
-    JWTManager, create_access_token,
-    jwt_required, get_jwt_identity
+    JWTManager,
+    create_access_token,
+    jwt_required,
+    get_jwt_identity
 )
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
 from fpdf import FPDF
-import tempfile
 
 from extensions import db, migrate
 from models import User, Transaction
@@ -18,7 +21,7 @@ def create_app():
     app = Flask(__name__)
 
     # =====================================================
-    # 🔥 SINGLE SOURCE OF TRUTH (NO Config CLASS)
+    # 🔥 ENV CONFIG (SINGLE SOURCE OF TRUTH)
     # =====================================================
     JWT_SECRET = os.environ.get("JWT_SECRET_KEY")
     DB_URL = os.environ.get("DATABASE_URL")
@@ -32,10 +35,12 @@ def create_app():
         JWT_SECRET_KEY=JWT_SECRET,
         SQLALCHEMY_DATABASE_URI=DB_URL,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+
+        # JWT CONFIG (FIXED)
         JWT_TOKEN_LOCATION=["headers"],
         JWT_HEADER_NAME="Authorization",
         JWT_HEADER_TYPE="Bearer",
-        JWT_ACCESS_TOKEN_EXPIRES=False,
+        JWT_ACCESS_TOKEN_EXPIRES=timedelta(days=7),
     )
 
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -65,6 +70,7 @@ def create_app():
     CORS(
         app,
         origins=["https://aayush-oza.github.io"],
+        supports_credentials=False,
         allow_headers=["Content-Type", "Authorization"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
@@ -80,9 +86,7 @@ def create_app():
     # =====================================================
     @app.route("/api/register", methods=["POST"])
     def register():
-        data = request.get_json()
-        if not data:
-            return jsonify(error="Invalid data"), 400
+        data = request.get_json() or {}
 
         try:
             user = User(
@@ -99,7 +103,8 @@ def create_app():
 
     @app.route("/api/login", methods=["POST"])
     def login():
-        data = request.get_json()
+        data = request.get_json() or {}
+
         user = User.query.filter_by(email=data.get("email")).first()
 
         if not user or not check_password_hash(user.password, data.get("password")):
@@ -124,7 +129,7 @@ def create_app():
     @jwt_required()
     def add_transaction():
         user_id = get_jwt_identity()
-        data = request.get_json()
+        data = request.get_json() or {}
 
         required = ("amount", "type", "category", "mode", "date")
         if not all(data.get(k) for k in required):
@@ -148,7 +153,9 @@ def create_app():
     @jwt_required()
     def transactions():
         user_id = get_jwt_identity()
-        txns = Transaction.query.filter_by(user_id=user_id).order_by(Transaction.date.desc()).all()
+        txns = Transaction.query.filter_by(
+            user_id=user_id
+        ).order_by(Transaction.date.desc()).all()
 
         return jsonify([
             {
@@ -159,7 +166,8 @@ def create_app():
                 "description": t.description,
                 "mode": t.mode,
                 "date": str(t.date)
-            } for t in txns
+            }
+            for t in txns
         ])
 
     @app.route("/api/edit-transaction/<int:txn_id>", methods=["PUT"])
@@ -171,13 +179,15 @@ def create_app():
             user_id=user_id
         ).first_or_404()
 
-        data = request.get_json()
+        data = request.get_json() or {}
+
         txn.amount = float(data["amount"])
         txn.type = data["type"]
         txn.category = data["category"]
         txn.description = data.get("description")
         txn.mode = data["mode"]
         txn.date = datetime.strptime(data["date"], "%Y-%m-%d").date()
+
         db.session.commit()
         return jsonify(success=True)
 
@@ -185,7 +195,10 @@ def create_app():
     @jwt_required()
     def delete_transaction(txn_id):
         user_id = get_jwt_identity()
-        txn = Transaction.query.filter_by(id=txn_id, user_id=user_id).first_or_404()
+        txn = Transaction.query.filter_by(
+            id=txn_id,
+            user_id=user_id
+        ).first_or_404()
 
         db.session.delete(txn)
         db.session.commit()
@@ -234,7 +247,10 @@ def create_app():
     def download_ledger():
         user_id = get_jwt_identity()
         user = User.query.get_or_404(user_id)
-        txns = Transaction.query.filter_by(user_id=user_id).order_by(Transaction.date.asc()).all()
+
+        txns = Transaction.query.filter_by(
+            user_id=user_id
+        ).order_by(Transaction.date.asc()).all()
 
         running_balance = 0
         pdf = FPDF()
@@ -245,12 +261,21 @@ def create_app():
 
         for t in txns:
             running_balance += t.amount if t.type == "credit" else -t.amount
-            pdf.cell(0, 8, f"{t.date} | {t.category} | {running_balance:.2f}", ln=True)
+            pdf.cell(
+                0,
+                8,
+                f"{t.date} | {t.category} | {running_balance:.2f}",
+                ln=True
+            )
 
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         pdf.output(tmp.name)
 
-        return send_file(tmp.name, as_attachment=True, download_name="ledger.pdf")
+        return send_file(
+            tmp.name,
+            as_attachment=True,
+            download_name="ledger.pdf"
+        )
 
     # =====================================================
     # HEALTH
