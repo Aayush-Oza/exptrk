@@ -110,7 +110,7 @@ def create_app():
         if not user or not check_password_hash(user.password, data.get("password")):
             return jsonify(error="Invalid credentials"), 401
 
-        token = create_access_token(identity=user.id)
+        token = create_access_token(identity=str(user.id))
 
         return jsonify(
             success=True,
@@ -128,7 +128,7 @@ def create_app():
     @app.route("/api/add-transaction", methods=["POST"])
     @jwt_required()
     def add_transaction():
-        user_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
         data = request.get_json() or {}
 
         required = ("amount", "type", "category", "mode", "date")
@@ -152,7 +152,7 @@ def create_app():
     @app.route("/api/transactions")
     @jwt_required()
     def transactions():
-        user_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
         txns = Transaction.query.filter_by(
             user_id=user_id
         ).order_by(Transaction.date.desc()).all()
@@ -173,7 +173,7 @@ def create_app():
     @app.route("/api/edit-transaction/<int:txn_id>", methods=["PUT"])
     @jwt_required()
     def edit_transaction(txn_id):
-        user_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
         txn = Transaction.query.filter_by(
             id=txn_id,
             user_id=user_id
@@ -194,7 +194,7 @@ def create_app():
     @app.route("/api/delete-transaction/<int:txn_id>", methods=["DELETE"])
     @jwt_required()
     def delete_transaction(txn_id):
-        user_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
         txn = Transaction.query.filter_by(
             id=txn_id,
             user_id=user_id
@@ -210,7 +210,7 @@ def create_app():
     @app.route("/api/ledger")
     @jwt_required()
     def ledger():
-        user_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
         txns = Transaction.query.filter_by(user_id=user_id).all()
 
         balance = sum(
@@ -226,7 +226,7 @@ def create_app():
     @app.route("/api/analytics")
     @jwt_required()
     def analytics():
-        user_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
         txns = Transaction.query.filter_by(user_id=user_id).all()
 
         modes, types, categories = {}, {}, {}
@@ -245,7 +245,7 @@ def create_app():
     @app.route("/api/download-ledger")
     @jwt_required()
     def download_ledger():
-        user_id = get_jwt_identity()
+        user_id = int(get_jwt_identity())
         user = User.query.get_or_404(user_id)
 
         txns = Transaction.query.filter_by(
