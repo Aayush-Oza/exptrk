@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo  # Python 3.9+
 import tempfile
 
 from flask import Flask, request, jsonify, send_file
@@ -260,18 +261,21 @@ def create_app():
         pdf.set_font("Helvetica", "B", 15)
         pdf.cell(0, 10, "LEDGER ACCOUNT", ln=True, align="C")
 
-        pdf.ln(2)
+        pdf.ln(6)
+
         pdf.set_font("Helvetica", size=10)
-        pdf.cell(0, 7, f"Account Holder : {user.name}", ln=True, align="C")
+        pdf.cell(0, 6, f"Account Holder : {user.name}", ln=True, align="L")
+
+        now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
         pdf.cell(
             0,
-            7,
-            f"Generated On : {datetime.now().strftime('%d %b %Y, %I:%M %p')}",
+            6,
+            f"Generated On : {now_ist.strftime('%d %b %Y, %I:%M %p IST')}",
             ln=True,
-            align="C"
+            align="L"
         )
-
         pdf.ln(8)
+
     # ================= TABLE HEADER =================
         pdf.set_font("Helvetica", "B", 9)
         pdf.cell(30, 8, "Date", border=1)
