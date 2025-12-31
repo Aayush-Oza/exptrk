@@ -252,22 +252,75 @@ def create_app():
             user_id=user_id
         ).order_by(Transaction.date.asc()).all()
 
-        running_balance = 0
         pdf = FPDF()
         pdf.add_page()
-        pdf.set_font("Helvetica", size=10)
+        pdf.set_auto_page_break(auto=True, margin=15)
 
-        pdf.cell(0, 10, f"Ledger - {user.name}", ln=True)
+    # ================= HEADER =================
+        pdf.set_font("Helvetica", "B", 15)
+        pdf.cell(0, 10, "LEDGER ACCOUNT", ln=True, align="C")
+
+        pdf.ln(2)
+        pdf.set_font("Helvetica", size=10)
+        pdf.cell(0, 7, f"Account Holder : {user.name}", ln=True, align="C")
+        pdf.cell(
+            0,
+            7,
+            f"Generated On : {datetime.now().strftime('%d %b %Y, %I:%M %p')}",
+            ln=True,
+            align="C"
+        )
+
+        pdf.ln(8)
+    # ================= TABLE HEADER =================
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(30, 8, "Date", border=1)
+        pdf.cell(60, 8, "Particulars", border=1)
+        pdf.cell(25, 8, "Debit", border=1, align="R")
+        pdf.cell(25, 8, "Credit", border=1, align="R")
+        pdf.cell(25, 8, "Balance", border=1, align="R")
+        pdf.ln()
+    # ================= TABLE BODY =================
+        pdf.set_font("Helvetica", size=9)
+        running_balance = 0
 
         for t in txns:
-            running_balance += t.amount if t.type == "credit" else -t.amount
-            pdf.cell(
-                0,
-                8,
-                f"{t.date} | {t.category} | {running_balance:.2f}",
-                ln=True
-            )
+            date = t.date.strftime("%d-%m-%Y")
 
+            particulars = t.category.capitalize()
+            if t.description:
+                particulars += f" ({t.description})"
+
+            debit = ""
+            credit = ""
+
+            if t.type == "debit":
+                running_balance -= t.amount
+                debit = f"{t.amount:.2f}"
+            else:
+                running_balance += t.amount
+                credit = f"{t.amount:.2f}"
+
+            pdf.cell(30, 8, date, border=1)
+            pdf.cell(60, 8, particulars, border=1)
+            pdf.cell(25, 8, debit, border=1, align="R")
+            pdf.cell(25, 8, credit, border=1, align="R")
+            pdf.cell(25, 8, f"{running_balance:.2f}", border=1, align="R")
+            pdf.ln()
+
+    # ================= CLOSING BALANCE =================
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(140, 9, "Closing Balance", border=1)
+        pdf.cell(
+            25,
+            9,
+            f"{running_balance:.2f}",
+            border=1,
+            align="R"
+        )
+
+    # ================= SAVE & SEND =================
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         pdf.output(tmp.name)
 
@@ -276,6 +329,7 @@ def create_app():
             as_attachment=True,
             download_name="ledger.pdf"
         )
+
 
     # =====================================================
     # HEALTH
