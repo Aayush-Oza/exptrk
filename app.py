@@ -69,12 +69,12 @@ def create_app():
     # CORS
     # =====================================================
     CORS(
-        app,
-        origins=["https://aayush-oza.github.io"],
-        supports_credentials=False,
-        allow_headers=["Content-Type", "Authorization"],
-        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    app,
+    resources={r"/api/*": {"origins": "*"}},
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
+
 
     # =====================================================
     # DATABASE
@@ -349,3 +349,4 @@ app = create_app()
 
 if __name__ == "__main__":
     app.run(debug=True)
+
